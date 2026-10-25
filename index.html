@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdnjs.cloudflare.com; connect-src https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://*.google.com https://www.gstatic.com wss://*.firebaseio.com; img-src 'self' data: blob: https:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-src https://*.firebaseapp.com https://accounts.google.com; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>Batalla Naval TV</title>
 <style>
@@ -19,13 +20,19 @@ button,input{font-size:18px;padding:12px 18px;margin:6px;border-radius:10px;bord
 button{background:#e8a020;color:#000;font-weight:700}button:disabled{opacity:.4}
 </style></head><body>
 <div id="app"></div>
+<script>
+function show(m){document.body.insertAdjacentHTML('beforeend','<pre style="color:#fff;white-space:pre-wrap;text-align:left;padding:16px;position:relative;z-index:9;font-size:20px">'+m+'</pre>')}
+addEventListener('error',function(e){show('Error: '+e.message)});
+addEventListener('unhandledrejection',function(e){show('Error: '+((e.reason&&e.reason.message)||e.reason))});
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {getAuth,signInAnonymously} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {getFirestore,doc,setDoc,updateDoc,onSnapshot} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-const firebaseConfig = {
+// PEGÁ ACÁ el firebaseConfig de tu proyecto teg-tv (el mismo del TEG y el Burako)
+const cfg={
   apiKey: "AIzaSyDnQsK7jNVciU2Ruo-mwELvFR97S6tNhgg",
   authDomain: "teg-tv.firebaseapp.com",
   projectId: "teg-tv",
@@ -36,23 +43,34 @@ const firebaseConfig = {
 
 const $=q=>document.querySelector(q),app=$('#app'),L="ABCDEFGHIJ",nm=i=>L[i/10|0]+(i%10+1);
 const fb=initializeApp(cfg),db=getFirestore(fb);
-const uid=(await signInAnonymously(getAuth(fb))).user.uid;
-const code=new URLSearchParams(location.search).get('s');
+let uid;
+const AL='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+let code=(new URLSearchParams(location.search).get('r')||'').toUpperCase();if(!/^[A-HJ-NP-Z2-9]{6}$/.test(code))code='';
 let D={},ref,seen=0,ev=null;
 
-if(code)phone();else tv();
+if(!cfg.apiKey)show('Falta pegar el firebaseConfig en index.html');
+else signInAnonymously(getAuth(fb)).then(u=>{uid=u.user.uid;if(code)phone();else home()}).catch(e=>show('No se pudo conectar con Firebase: '+e.message));
+
+/* ================= INICIO ================= */
+function home(){
+  app.innerHTML=`<h1 style="font-size:40px;margin:.6em 0 .2em">⚓ BATALLA NAVAL</h1><p>La TV es el mar. Cada celular es tu puesto de mando.</p><button data-h=host>Crear sala en esta pantalla (TV)</button><br><button data-h=sj>Entrar desde un celular</button><div id=jb style="display:none"><input id=cd maxlength=6 placeholder="AB12CD" style="text-transform:uppercase;text-align:center"><br><button data-h=go>Entrar a la sala</button></div>`;
+  app.onclick=e=>{const h=e.target.dataset.h;
+    if(h=='host')tv();
+    if(h=='sj')$('#jb').style.display='block';
+    if(h=='go'){const c=($('#cd').value||'').trim().toUpperCase();if(c.length<6)return show('Poné el código de 6 caracteres');location.href=location.pathname+'?r='+c}};
+}
 
 /* ================= TV ================= */
 function tv(){
-  const c=Math.random().toString(36).slice(2,7).toUpperCase();
+  const c=Array.from(crypto.getRandomValues(new Uint8Array(6)),b=>AL[b%32]).join('');
   ref=doc(db,'naval',c);
-  setDoc(ref,{hostId:uid,phase:'lobby',players:{},turn:null,shot:null,res:null,winner:null});
+  setDoc(ref,{hostId:uid,phase:'lobby',players:{},turn:null,shot:null,res:null,winner:null}).catch(e=>show('No se pudo crear la sala: '+e.message+'<br>Revisá las reglas de Firestore (tienen que permitir la colección "naval").'));
   app.remove();
   document.body.insertAdjacentHTML('beforeend','<canvas id=cv></canvas><div id=hud></div><div id=ov><div id=qr></div><div id=tx></div></div>');
-  const url=location.origin+location.pathname+'?s='+c;
+  const url=location.origin+location.pathname+'?r='+c;
   new QRCode($('#qr'),{text:url,width:240,height:240});
   onSnapshot(ref,s=>{
-    D=s.data();const P=D.players,K=Object.keys(P),n=k=>P[k].name;
+    if(!s.exists())return;D=s.data();const P=D.players,K=Object.keys(P),n=k=>P[k].name;
     if(D.phase=='lobby'&&K.length>=2)updateDoc(ref,{phase:'place'});
     if(D.phase=='place'&&K.length>=2&&K.every(k=>P[k].ready))updateDoc(ref,{phase:'play',turn:K[Math.random()*2|0]});
     if(D.res&&D.res.id!==seen){seen=D.res.id;ev={t:performance.now(),hit:D.res.hit,sunk:D.res.sunk,i:D.res.i,by:D.res.by,d:D.res.t=='d',pr:D.res.present}}
@@ -68,7 +86,7 @@ function tv(){
     }
     $('#hud').innerHTML=D.phase=='play'||D.phase=='end'?K.map(k=>`<span>${n(k)} ${'▰'.repeat(P[k].left)}${'▱'.repeat(5-P[k].left)}</span>`).join(''):'';
     $('#tx').innerHTML=h;
-  });
+  },e=>show('Error de lectura: '+e.message));
   loop(0);
 }
 function ship(g,x,y,s,col,t){
@@ -137,7 +155,7 @@ function loop(t){
 let ships=[],todo=[5,4,3,3,2],hor=true,sel=-1,mine={},taken={},shots=0,hits=0,done={},weapon='c',droneUsed=false,scan={};
 function phone(){
   ref=doc(db,'naval',code);
-  onSnapshot(ref,s=>{D=s.data()||{};logic();draw()});
+  onSnapshot(ref,s=>{D=s.data()||{};logic();draw()},e=>show('Error de lectura: '+e.message));
   app.onclick=e=>{const d=e.target.dataset;if(d.i!=null)tap(+d.i);if(d.a)act(d.a)};
 }
 const at=i=>ships.find(s=>s.cells.includes(i));
