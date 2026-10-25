@@ -25,8 +25,14 @@ import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase
 import {getAuth,signInAnonymously} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {getFirestore,doc,setDoc,updateDoc,onSnapshot} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-// PEGÁ ACÁ el firebaseConfig de tu proyecto teg-tv (el mismo del TEG y el Burako)
-const cfg={apiKey:"",authDomain:"",projectId:"",appId:""};
+const firebaseConfig = {
+  apiKey: "AIzaSyDnQsK7jNVciU2Ruo-mwELvFR97S6tNhgg",
+  authDomain: "teg-tv.firebaseapp.com",
+  projectId: "teg-tv",
+  storageBucket: "teg-tv.firebasestorage.app",
+  messagingSenderId: "735650643113",
+  appId: "1:735650643113:web:e0ad00556934ce48773db8"
+};
 
 const $=q=>document.querySelector(q),app=$('#app'),L="ABCDEFGHIJ",nm=i=>L[i/10|0]+(i%10+1);
 const fb=initializeApp(cfg),db=getFirestore(fb);
