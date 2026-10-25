@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Batalla Naval TV</title>
+<style>
+body{margin:0;background:#05101f;color:#fff;font-family:system-ui,sans-serif;text-align:center;overflow-x:hidden}
+canvas{position:fixed;inset:0;z-index:0}
+#ov{position:fixed;inset:0;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:9vh;box-sizing:border-box;pointer-events:none}
+#hud{position:fixed;top:0;left:0;right:0;z-index:1;display:flex;justify-content:space-between;padding:1.2vw 2vw;font-size:2.2vw;text-shadow:0 0 8px #000}
+#ov h1{font-size:5vw;margin:.2em;text-shadow:0 0 20px #000}
+#ov p{font-size:2.6vw;margin:.2em;text-shadow:0 0 12px #000}
+#qr{background:#fff;padding:12px;border-radius:12px;margin:10px}
+#app{padding:12px;max-width:440px;margin:auto}
+.g{display:grid;grid-template-columns:repeat(10,1fr);gap:2px;margin:10px auto}
+.g b{aspect-ratio:1;background:#12385a;border-radius:3px;display:block}
+.g .s{background:#9ab}.g .h{background:#f54}.g .m{background:#456}.g .dp{background:#e8a020}.g .dn{background:#2a6a52}.g .p{outline:3px solid #fd0}
+.sm{max-width:200px;margin:auto}
+button,input{font-size:18px;padding:12px 18px;margin:6px;border-radius:10px;border:0}
+button{background:#e8a020;color:#000;font-weight:700}button:disabled{opacity:.4}
+</style></head><body>
+<div id="app"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getAuth,signInAnonymously} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getFirestore,doc,setDoc,updateDoc,onSnapshot} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// PEGÁ ACÁ el firebaseConfig de tu proyecto teg-tv (el mismo del TEG y el Burako)
+const cfg={apiKey:"",authDomain:"",projectId:"",appId:""};
+
+const $=q=>document.querySelector(q),app=$('#app'),L="ABCDEFGHIJ",nm=i=>L[i/10|0]+(i%10+1);
+const fb=initializeApp(cfg),db=getFirestore(fb);
+const uid=(await signInAnonymously(getAuth(fb))).user.uid;
+const code=new URLSearchParams(location.search).get('s');
+let D={},ref,seen=0,ev=null;
+
+if(code)phone();else tv();
+
+/* ================= TV ================= */
+function tv(){
+  const c=Math.random().toString(36).slice(2,7).toUpperCase();
+  ref=doc(db,'naval',c);
+  setDoc(ref,{hostId:uid,phase:'lobby',players:{},turn:null,shot:null,res:null,winner:null});
+  app.remove();
+  document.body.insertAdjacentHTML('beforeend','<canvas id=cv></canvas><div id=hud></div><div id=ov><div id=qr></div><div id=tx></div></div>');
+  const url=location.origin+location.pathname+'?s='+c;
+  new QRCode($('#qr'),{text:url,width:240,height:240});
+  onSnapshot(ref,s=>{
+    D=s.data();const P=D.players,K=Object.keys(P),n=k=>P[k].name;
+    if(D.phase=='lobby'&&K.length>=2)updateDoc(ref,{phase:'place'});
+    if(D.phase=='place'&&K.length>=2&&K.every(k=>P[k].ready))updateDoc(ref,{phase:'play',turn:K[Math.random()*2|0]});
+    if(D.res&&D.res.id!==seen){seen=D.res.id;ev={t:performance.now(),hit:D.res.hit,sunk:D.res.sunk,i:D.res.i,by:D.res.by,d:D.res.t=='d',pr:D.res.present}}
+    $('#qr').style.display=D.phase=='lobby'?'block':'none';
+    let h='';
+    if(D.phase=='lobby')h=`<h1>⚓ Esperando comandantes</h1><p>Escaneá el QR con el celular</p><p>${K.map(n).join(' · ')}</p>`;
+    else if(D.phase=='place')h='<h1>Desplegando flotas…</h1><p>'+K.map(k=>n(k)+(P[k].ready?' ✅':' ⏳')).join(' · ')+'</p>';
+    else if(D.phase=='play'){
+      const r=D.res;
+      h=`<h1>${D.turn?'Turno de '+n(D.turn)+(r&&r.hit&&D.turn==r.by?' · turno extra':''):'¡Fuego!'}</h1>`+(r?`<p>${n(r.by)} → ${r.t=='d'?'📡 dron en '+nm(r.i)+': '+(r.present?'presencia enemiga':'zona despejada'):nm(r.i)+': '+(r.sunk?'💥 ¡HUNDIDO! (barco de '+r.sunk+')':r.hit?'🔥 ¡Tocado!':'💧 Agua')}</p>`:'');
+    }else if(D.phase=='end'){
+      h=`<h1>🏆 ¡Ganó ${n(D.winner)}!</h1>`+K.map(k=>`<p>${n(k)}: ${P[k].hits}/${P[k].shots} aciertos (${P[k].shots?Math.round(100*P[k].hits/P[k].shots):0}% de precisión)</p>`).join('');
+    }
+    $('#hud').innerHTML=D.phase=='play'||D.phase=='end'?K.map(k=>`<span>${n(k)} ${'▰'.repeat(P[k].left)}${'▱'.repeat(5-P[k].left)}</span>`).join(''):'';
+    $('#tx').innerHTML=h;
+  });
+  loop(0);
+}
+function ship(g,x,y,s,col,t){
+  g.save();g.translate(x,y);g.scale(s,s);
+  g.fillStyle=col;g.beginPath();g.moveTo(0,0);g.lineTo(210,0);g.lineTo(190,24);g.lineTo(22,24);g.fill();
+  g.fillStyle='#4b586b';g.fillRect(66,-14,70,14);g.fillRect(88,-28,30,14);
+  g.fillStyle='#2b3442';g.fillRect(101,-66,3,40);g.fillRect(44,-9,16,9);g.fillRect(150,-9,16,9);
+  g.fillStyle='#161a22';g.fillRect(70,-30,14,16);g.fillRect(120,-26,14,12);
+  g.fillStyle='#555';
+  for(let k=0;k<5;k++){const p=(t/900+k/5)%1;g.globalAlpha=.5*(1-p);g.beginPath();g.arc(77-p*70,-32-p*50,6+p*16,0,7);g.fill()}
+  g.globalAlpha=1;g.restore();
+}
+function loop(t){
+  const cv=$('#cv'),g=cv.getContext('2d'),w=cv.width=innerWidth,h=cv.height=innerHeight,day=D.phase=='play'||D.phase=='end',hz=h*.55;
+  let gr=g.createLinearGradient(0,0,0,hz);
+  if(day){gr.addColorStop(0,'#2d4f80');gr.addColorStop(.7,'#e59a5a');gr.addColorStop(1,'#f6c987')}else{gr.addColorStop(0,'#020812');gr.addColorStop(1,'#0e2a48')}
+  g.fillStyle=gr;g.fillRect(0,0,w,hz);
+  gr=g.createLinearGradient(0,hz,0,h);
+  if(day){gr.addColorStop(0,'#c98b5c');gr.addColorStop(.25,'#2b4f78');gr.addColorStop(1,'#0b2340')}else{gr.addColorStop(0,'#0e2a48');gr.addColorStop(1,'#04101e')}
+  g.fillStyle=gr;g.fillRect(0,hz,w,h-hz);
+  if(day){g.fillStyle='rgba(255,230,170,.35)';g.beginPath();g.arc(w*.75,hz,h*.12,0,7);g.fill()}
+  g.fillStyle=day?'rgba(255,255,255,.15)':'rgba(255,255,255,.05)';
+  for(let k=0;k<5;k++){g.beginPath();g.ellipse((k*w*.27+t/80)%(w*1.3)-w*.15,h*.12+k*h*.05,w*.12,h*.025,0,0,7);g.fill()}
+  g.strokeStyle='rgba(160,200,240,.25)';g.lineWidth=1.5;
+  for(let k=0;k<7;k++){g.beginPath();for(let x=0;x<=w;x+=20)g.lineTo(x,hz+10+k*h*.06+Math.sin(x/70+t/600+k)*7);g.stroke()}
+  const s=w*.0016,tx=w*.62,ty=h*.64;
+  let e=ev?(t-ev.t)/1000:99;
+  if(ev&&e>(ev.sunk?5:3.5)){ev=null;e=99}
+  ship(g,w*.05,h*.74,s*1.25,'#7d8794',t);
+  g.save();
+  if(ev&&ev.sunk&&e>1.3){const p=Math.min(1,(e-1.3)/3),cx=tx+105*s;g.globalAlpha=1-p*.7;g.translate(cx,ty);g.rotate(p*.4);g.translate(-cx,-ty+p*70);}
+  ship(g,tx,ty,s,'#6b7480',t);g.restore();
+  if(ev&&ev.d){
+    const cx=tx+105*s,dx=Math.min(1,e/1.2),px=w*.1+(cx-w*.1)*dx,py=h*.22+Math.sin(e*3)*6;
+    g.fillStyle='#d8dee8';g.fillRect(px-14,py-3,28,6);g.fillRect(px-3,py-9,6,6);g.fillRect(px-20,py-8,12,2);g.fillRect(px+8,py-8,12,2);
+    if(e>1){const q=e-1,a=Math.max(0,1-q/2.5);
+      g.globalAlpha=a*.5;g.fillStyle='#bfe4ff';g.beginPath();g.moveTo(px,py+4);g.lineTo(cx-110*s,ty+20);g.lineTo(cx+110*s,ty+20);g.fill();
+      g.globalAlpha=a;
+      if(ev.pr){g.strokeStyle='#ff3b30';g.lineWidth=3;for(let k=0;k<2;k++){const p=(t/700+k/2)%1;g.beginPath();g.arc(cx,ty+8,p*70*s+10,0,7);g.stroke()}}
+      g.globalAlpha=1}
+  }else if(ev){
+    const cx=tx+105*s,cy=ty-12*s,gx=w*.05+150*s*1.25,gy=h*.74-14;
+    if(e<.25){g.fillStyle='rgba(255,220,120,'+(1-e*4)+')';g.beginPath();g.arc(gx,gy,26*(1+e*4),0,7);g.fill()}
+    if(e<1){g.fillStyle='#fff3c0';g.beginPath();g.arc(gx+(cx-gx)*e,gy+(cy-gy)*e-Math.sin(e*Math.PI)*h*.3,6,0,7);g.fill()}
+    else{
+      const q=e-1;
+      if(ev.hit){
+        const a=Math.max(0,1-q/(ev.sunk?4:2.2));
+        if(q<.3){g.fillStyle='rgba(255,255,255,'+(1-q/.3)+')';g.beginPath();g.arc(cx,cy,120*s*(.5+q*3),0,7);g.fill()}
+        g.globalAlpha=a;
+        for(let k=0;k<7;k++){g.fillStyle=k%2?'#ff6a10':'#ffd34a';g.beginPath();g.arc(cx-60*s+k*20*s,cy-6*s-Math.abs(Math.sin(t/110+k))*16*s,(10+4*Math.sin(t/90+k*2))*s*1.6,0,7);g.fill()}
+        g.fillStyle='#222';
+        for(let k=0;k<6;k++){const p=(t/1000+k/6)%1;g.globalAlpha=a*.6*(1-p);g.beginPath();g.arc(cx-20*s+p*60*s,cy-20*s-p*180*s,(10+p*30)*s*1.6,0,7);g.fill()}
+        g.globalAlpha=1;
+      }else{
+        const a=Math.max(0,1-q/2),mx=cx+(ev.i%10-5)*18,my=ty+12*s,hh=Math.sin(Math.min(1,q/1.2)*Math.PI)*h*.12;
+        g.globalAlpha=a;g.fillStyle='#cfe8ff';g.fillRect(mx-8,my-hh,16,hh);
+        g.strokeStyle='#cfe8ff';g.beginPath();g.ellipse(mx,my,q*70,q*14,0,0,7);g.stroke();g.globalAlpha=1;
+      }
+    }
+  }
+  requestAnimationFrame(loop);
+}
+
+/* ================= CELULAR ================= */
+let ships=[],todo=[5,4,3,3,2],hor=true,sel=-1,mine={},taken={},shots=0,hits=0,done={},weapon='c',droneUsed=false,scan={};
+function phone(){
+  ref=doc(db,'naval',code);
+  onSnapshot(ref,s=>{D=s.data()||{};logic();draw()});
+  app.onclick=e=>{const d=e.target.dataset;if(d.i!=null)tap(+d.i);if(d.a)act(d.a)};
+}
+const at=i=>ships.find(s=>s.cells.includes(i));
+function put(i,size,h){
+  const r=i/10|0,c=i%10;if(h?c+size>10:r+size>10)return false;
+  const cells=[...Array(size)].map((_,k)=>i+(h?k:10*k));
+  if(cells.some(x=>at(x)))return false;ships.push({size,cells,hits:0});return true;
+}
+function tap(i){
+  if(D.phase=='place'&&!(D.players[uid]||{}).ready){
+    const s=at(i);
+    if(s){ships=ships.filter(x=>x!=s);todo.push(s.size);todo.sort((a,b)=>b-a)}
+    else if(todo.length&&put(i,todo[0],hor))todo.shift();
+  }else if(D.phase=='play'&&D.turn==uid&&(weapon=='d'||mine[i]==null))sel=i;
+  draw();
+}
+function act(a){
+  if(a=='rot')hor=!hor;
+  if(a=='auto'){ships=[];todo=[5,4,3,3,2];while(todo.length){if(put(Math.random()*100|0,todo[0],Math.random()<.5))todo.shift()}}
+  if(a=='join'){const n=($('#n').value||'Comandante').slice(0,14);localStorage.n=n;
+    updateDoc(ref,{['players.'+uid]:{name:n,ready:false,shots:0,hits:0,left:5}})}
+  if(a=='ready')updateDoc(ref,{['players.'+uid+'.ready']:true});
+  if(a=='wc')weapon='c';if(a=='wd'&&!droneUsed)weapon='d';
+  if(a=='fire'&&sel>=0){const d=weapon=='d';updateDoc(ref,{shot:{id:Date.now(),by:uid,i:sel,...(d?{t:'d'}:{})},res:null,turn:null});if(d){droneUsed=true;weapon='c'}sel=-1}
+  draw();
+}
+function logic(){
+  if(D.phase!='play'&&D.phase!='end')return;
+  const s=D.shot,r=D.res;
+  // defensor: resuelve el disparo con su flota (que nunca sale del celular)
+  if(D.phase=='play'&&s&&s.by!==uid&&s.id!==done.s&&ships.length){
+    done.s=s.id;
+    if(s.t=='d'){updateDoc(ref,{res:{id:s.id,by:s.by,i:s.i,t:'d',present:area(s.i).some(c=>at(c))},turn:uid});return}
+    const sh=at(s.i),hit=!!sh;taken[s.i]=hit?'h':'m';let sunk=0;
+    if(sh){sh.hits++;if(sh.hits==sh.size)sunk=sh.size}
+    const lost=ships.every(x=>x.hits==x.size);
+    updateDoc(ref,{res:{id:s.id,by:s.by,i:s.i,hit,sunk},turn:hit?s.by:uid,['players.'+uid+'.left']:ships.filter(x=>x.hits<x.size).length,...(lost?{phase:'end',winner:s.by}:{})});
+    navigator.vibrate&&navigator.vibrate(hit?300:50);
+  }
+  // atacante: marca el resultado y actualiza sus estadísticas
+  if(r&&r.by===uid&&r.id!==done.r){
+    done.r=r.id;if(r.t=='d'){area(r.i).forEach(c=>scan[c]=r.present?'dp':'dn');return}
+    mine[r.i]=r.hit?'h':'m';shots++;if(r.hit)hits++;
+    updateDoc(ref,{['players.'+uid+'.shots']:shots,['players.'+uid+'.hits']:hits});
+  }
+}
+const area=i=>{const r=i/10|0,c=i%10,o=[];for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const y=r+a,x=c+b;if(y>=0&&y<10&&x>=0&&x<10)o.push(y*10+x)}return o};
+const dmsg=()=>D.res&&D.res.by==uid&&D.res.t=='d'?'<p>📡 Dron: '+(D.res.present?'hay presencia enemiga en la zona (ámbar)':'zona despejada (verde)')+'</p>':'';
+const grid=f=>'<div class=g>'+[...Array(100)].map((_,i)=>`<b data-i=${i} class="${f(i)}"></b>`).join('')+'</div>';
+const own=i=>(at(i)?'s ':'')+(taken[i]||'');
+function draw(){
+  const P=D.players||{},p=P[uid];let x='';
+  if(!D.phase)x='<h2>Sala no encontrada</h2>';
+  else if(!p&&D.phase=='lobby')x=Object.keys(P).length>=2?'<h2>Sala llena</h2>':`<h2>⚓ Entrar a la batalla</h2><input id=n placeholder="Tu nombre" value="${localStorage.n||''}"><button data-a=join>Entrar</button>`;
+  else if(!p)x='<h2>Partida en curso</h2>';
+  else if(D.phase=='lobby')x='<h2>Esperando al rival…</h2>';
+  else if(D.phase=='place')x=p.ready?'<h2>Flota lista. Esperando al rival…</h2>':
+    `<h2>Ubicá tu flota</h2><p>${todo.length?'Barco de <b>'+todo[0]+'</b> casilleros · '+(hor?'horizontal':'vertical'):'¡Todos ubicados!'}</p>`+grid(own)+
+    `<button data-a=rot>Rotar</button><button data-a=auto>Auto</button>`+(todo.length?'':'<button data-a=ready>¡Listo!</button>')+'<p>Tocá un barco para quitarlo</p>';
+  else if(D.phase=='play'){const my=D.turn==uid;
+    x=`<h2>${my?'🎯 Tu turno':D.turn?'Turno del rival':'Disparo en el aire…'}</h2>`+dmsg()+grid(i=>(mine[i]||scan[i]||'')+(weapon=='d'?(sel>=0&&area(sel).includes(i)?' p':''):(i==sel?' p':'')))+
+    (my&&D.res&&D.res.by==uid&&D.res.hit?'<p>¡Tocado! Disparás de nuevo</p>':'')+(my?`<button data-a=wc>Cañón</button><button data-a=wd ${droneUsed?'disabled':''}>Dron ${droneUsed?'(usado)':'×1'}</button><br><button data-a=fire ${sel<0?'disabled':''}>${weapon=='d'?'📡 Enviar dron':'🔥 ¡Fuego!'} ${sel<0?'':nm(sel)}</button>`:'')+'<p>Tu flota</p><div class=sm>'+grid(own)+'</div>';}
+  else x=`<h2>${D.winner==uid?'🏆 ¡Victoria!':'💀 Flota hundida'}</h2><p>Precisión: ${shots?Math.round(100*hits/shots):0}% (${hits}/${shots})</p>`;
+  app.innerHTML=x;
+}
+</script></body></html>
